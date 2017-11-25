@@ -1,0 +1,72 @@
+{
+  "variables": {
+      "aws_access_key":     "{{env `AWS_ACCESS_KEY_ID`}}",
+      "aws_secret_key":     "{{env `AWS_SECRET_ACCESS_KEY`}}",
+      "aws_security_token": "{{env `AWS_SECURITY_TOKEN`}}"
+  },
+  "builders": [
+    {
+      "type": "amazon-ebs",
+      "region": "us-west-2",
+      "access_key": "{{user `aws_access_key`}}",
+      "secret_key": "{{user `aws_secret_key`}}",
+      "token": "{{user `aws_security_token`}}",
+      "source_ami": "ami-aa5ebdd2",
+      "instance_type": "t2.large",
+      "ssh_pty" : "true",
+      "ssh_username": "ec2-user",
+      "ami_name": "ephemeral_tr_ws_{{timestamp}}"
+    }
+  ],
+  "provisioners": [
+   { "type": "shell",
+      "inline": [
+      "sleep 30",
+      "sudo yum update -y",
+      "sudo yum install epel-release -y",
+      "sudo yum install @development -y",
+      "sudo yum install python-pip -y",
+      "sudo yum install python-setuptools -y",
+      "sudo yum install -y wget",
+      "sudo yum install -y libffi-devel",
+      "sudo yum install -y zlib-dev openssl-devel",
+      "sudo yum install -y qlite-devel bzip2-devel python-devel python34-virtualenv",
+      "sudo yum install python34 python34-devel python34-pip -y",
+      "sudo yum install gnupg2 -y",
+      "sudo alternatives --set python /usr/bin/python3.4",
+      "sudo pip install credstash",
+      "sudo pip install ansible",
+      "sudo pip install boto3 --upgrade",
+      "sudo yum install postgresql95-devel -y",
+      "sudo yum install rubygems -y",
+      "sudo yum install ruby23 ruby23-devel -y",
+      "curl --silent --location https://rpm.nodesource.com/setup_6.x | sudo bash -",
+      "sudo yum -y install nodejs",
+      "sudo npm install -g yarn",
+      "sudo gem update --system",
+      "sudo alternatives --set ruby /usr/bin/ruby2.3",
+      "/usr/bin/gem install bundler",
+      "git clone https://github.com/ThreatResponse/aws_ir.git",
+      "cd aws_ir",
+      "sudo python setup.py install",
+      "curl -s https://threatresponse-lime-modules.s3.amazonaws.com/REPO_SIGNING_KEY.asc | gpg --import -",
+      "sudo yum install docker -y",
+      "sudo service docker start",
+      "sudo chkconfig docker on",
+      "sudo mkdir ~/memdumps",
+      "sudo chown -R ec2-user:ec2-user /home/ec2-user/memdumps",
+      "sudo chmod 777 /home/ec2-user/memdumps",
+      "sudo yum install ncurses-devel -y"
+    ]},
+   {
+    "type": "file",
+    "source": "./files/motd",
+    "destination": "/home/ec2-user/motd"
+   },
+   { "type": "shell",
+      "inline": [
+      "sudo mv /home/ec2-user/motd /etc/motd"
+      ]
+   }
+ ]
+}

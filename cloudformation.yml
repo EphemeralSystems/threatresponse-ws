@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Deployment of the ThreatResponse Workstation"
+Parameters:
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Type: 'AWS::EC2::KeyPair::KeyName'
+Mappings:
+  RegionMap:
+    us-east-1:
+      "32": "ami-831385f9"
+    us-west-1:
+      "32": "ami-c9556ea9"
+    us-west-2:
+      "32": "ami-dec51aa6"
+    eu-west-2:
+      "32": "ami-6c849b08"
+    ap-southeast-1:
+      "32": "ami-a4f9a8c7"
+    ap-northeast-1:
+      "32": "ami-d155f2bf"
+Resources:
+  CaseBucket:
+    Type: AWS::S3::Bucket
+  ThreatResponseVPC:
+    Type: "AWS::EC2::VPC"
+    DependsOn: ThreatResponseInternetGateway
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      EnableDnsSupport: True
+      EnableDnsHostnames: True
+      Tags:
+        - Key: app
+          Value: incident-ThreatResponse
+  ThreatResponseInternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: app
+          Value: ThreatResponseWS
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn: ThreatResponseVPC
+    Properties:
+      VpcId:
+        Ref: ThreatResponseVPC
+      InternetGatewayId:
+        Ref: ThreatResponseInternetGateway
+  ThreatResponseRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    DependsOn: [ ThreatResponseVPC, ThreatResponseInternetGateway, AttachGateway ]
+    Properties:
+      VpcId:
+        Ref: ThreatResponseVPC
+      Tags:
+        - Key: app
+          Value: incident-ThreatResponse
+  ThreatResponseDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: ThreatResponseInternetGateway
+    Properties:
+      RouteTableId:
+        Ref: ThreatResponseRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: ThreatResponseInternetGateway
+  ThreatResponseSubnet1:
+    Type: "AWS::EC2::Subnet"
+    DependsOn: ThreatResponseRouteTable
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      CidrBlock: "10.0.0.0/24"
+      MapPublicIpOnLaunch: True
+      VpcId:
+        Ref: ThreatResponseVPC
+      Tags:
+        - Key: app
+          Value: ThreatResponseWS
+  ThreatResponseSubnet2:
+    Type: "AWS::EC2::Subnet"
+    DependsOn: ThreatResponseRouteTable
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      CidrBlock: "10.0.1.0/24"
+      MapPublicIpOnLaunch: True
+      VpcId:
+        Ref: ThreatResponseVPC
+      Tags:
+        - Key: app
+          Value: ThreatResponseWS
+  ThreatResponseRouteAc1:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    DependsOn: ThreatResponseDefaultRoute
+    Properties:
+      RouteTableId:
+        Ref: ThreatResponseRouteTable
+      SubnetId:
+        Ref: ThreatResponseSubnet1
+  ThreatResponseRouteAc2:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    DependsOn: ThreatResponseDefaultRoute
+    Properties:
+      RouteTableId:
+        Ref: ThreatResponseRouteTable
+      SubnetId:
+        Ref: ThreatResponseSubnet2
+  ThreatResponseSecGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    DependsOn: ThreatResponseVPC
+    Properties:
+      GroupDescription: "Allows ports to web instances of ThreatResponse from ELB."
+      VpcId:
+        Ref: ThreatResponseVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: app
+          Value: ThreatResponseWS
+  ExaminerRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+  ExaminerInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    DependsOn: ExaminerRole
+    Properties:
+      Roles:
+        -
+          Ref: ExaminerRole
+  ExaminerPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: ExaminerPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action:
+              - "sts:AssumeRole"
+            Resource: "*"
+          -
+            Effect: "Allow"
+            Action:
+              - "s3:*"
+            Resource: "*"
+          -
+            Effect: "Allow"
+            Action:
+              - "ec2:*"
+            Resource: "*"
+          -
+            Effect: "Allow"
+            Action:
+              - "cloudtrail:*"
+            Resource: "*"
+          -
+            Effect: "Allow"
+            Action:
+              - "logs:*"
+            Resource: "*"
+          -
+            Effect: "Allow"
+            Action:
+              - "cloudwatch:*"
+            Resource: "*"
+          -
+            Effect: "Allow"
+            Action:
+              - "ssm:*"
+            Resource: "*"
+      Roles:
+        - Ref: ExaminerRole
+  ExaminerLaunchConfigProd:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    DependsOn: ExaminerInstanceProfile
+    Properties:
+      KeyName: !Ref KeyName
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", 32]
+      IamInstanceProfile: !GetAtt ExaminerInstanceProfile.Arn
+      SecurityGroups:
+        - Ref: ThreatResponseSecGroup
+      InstanceType: "t2.small"
+  ExaminerASG:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    DependsOn: [ ThreatResponseSubnet1, ThreatResponseSubnet2 ]
+    Properties:
+      Tags:
+        -
+          Key: Application
+          Value: threatresponse-ws
+          PropagateAtLaunch: true
+        -
+          Key: Name
+          Value: threatresponse-ws
+          PropagateAtLaunch: true
+      MaxSize: "1"
+      MinSize: "1"
+      VPCZoneIdentifier:
+        - Ref: ThreatResponseSubnet1
+        - Ref: ThreatResponseSubnet2
+      LaunchConfigurationName: !Ref ExaminerLaunchConfigProd
+Outputs:
+  CaseBucket:
+    Description: A pre created AWS_IR case bucket for you.  Put your assets collected here.
+    Value:
+      Ref: CaseBucket
